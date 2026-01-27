@@ -10,17 +10,21 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: lts/*
           cache: 'npm'
 
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: Install dependencies
         run: npm ci
@@ -39,12 +43,13 @@ jobs:
           rm certificate.p12
 
       - name: Build Tauri (macOS)
+        uses: tauri-apps/tauri-action@v0
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run tauri build
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
@@ -52,32 +57,32 @@ jobs:
           name: macos-dmg
           path: src-tauri/target/release/bundle/dmg/*.dmg
 
-      - name: Upload macOS App
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-app
-          path: src-tauri/target/release/bundle/macos/*.app
-
   build-windows:
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: lts/*
           cache: 'npm'
 
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Build Tauri (Windows)
-        run: npm run tauri build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Windows MSI
         uses: actions/upload-artifact@v4
