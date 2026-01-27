@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "default",
+  "description": "Default capabilities for the main window",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://app.dollie.pro/*", "https://api-layer.social/*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-hide",
+    "core:window:allow-minimize",
+    "notification:default",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
+    "window-state:allow-restore-state",
+    "window-state:allow-save-window-state",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "opener:allow-open-url"
+  ]
+}

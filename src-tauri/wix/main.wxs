@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows Store / MSIX configuration for Dollie
+
+  Package Identity Name: Dollie.Dollie
+  Publisher: CN=B569B1BF-FB02-4CDA-865B-F99702B1BB64
+  Publisher Display Name: Dollie
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="Dollie"
+    UpgradeCode="{{bundle.app.identifier}}"
+    Language="1033"
+    Codepage="1252"
+    Version="{{bundle.version}}"
+    Manufacturer="Dollie">
+
+    <Package
+      Id="*"
+      Keywords="Installer"
+      Description="Dollie Desktop Application"
+      Manufacturer="Dollie"
+      InstallerVersion="450"
+      Languages="1033"
+      Compressed="yes"
+      InstallScope="perUser"
+      SummaryCodepage="1252" />
+
+  </Product>
+</Wix>

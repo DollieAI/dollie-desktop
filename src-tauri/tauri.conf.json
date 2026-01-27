@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Dollie",
+  "version": "0.1.0",
+  "identifier": "com.dollie.desktop",
+  "build": {
+    "devUrl": "https://api-layer.social",
+    "frontendDist": "https://app.dollie.pro"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "Dollie",
+    "shortDescription": "Your Agency HQ for the AI Era",
+    "longDescription": "Dollie is your agency headquarters - where all your agency knowledge connects to any AI tool. Manage clients, sites, and workflows from one place.",
+    "category": "Business",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "Developer ID Application: Bowe Frankema (TXKA6PVZ8N)",
+      "entitlements": "Entitlements.plist"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "certificateThumbprint": null,
+      "timestampUrl": "http://timestamp.digicert.com"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["dollie"]
+      }
+    }
+  }
+}
