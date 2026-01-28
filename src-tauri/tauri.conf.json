@@ -34,7 +34,10 @@
     "macOS": {
       "minimumSystemVersion": "10.15",
       "signingIdentity": "Developer ID Application: Bowe Frankema (TXKA6PVZ8N)",
-      "entitlements": "Entitlements.plist"
+      "entitlements": "Entitlements.plist",
+      "notarization": {
+        "skipStapling": true
+      }
     },
     "windows": {
       "webviewInstallMode": {
