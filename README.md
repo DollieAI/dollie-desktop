@@ -37,7 +37,9 @@ Debug builds open `https://api-layer.social` (the local chq); release builds ope
 npm run build
 ```
 
-Outputs to `src-tauri/target/release/bundle/`. Updates are signed with the key in `~/.tauri/dollie-desktop.key`; CI needs it as `TAURI_SIGNING_PRIVATE_KEY` and its password as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The app checks `https://github.com/DollieAI/dollie-desktop/releases/latest/download/latest.json`.
+Outputs to `src-tauri/target/release/bundle/`.
+
+To release: set the same version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`, then push a matching tag (`v0.2.0`). CI builds a universal Mac app (signed with the Developer ID certificate, notarized and stapled) and a Windows installer (not code-signed yet), signs the update bundles with the key in `~/.tauri/dollie-desktop.key` (repo secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) and uploads them with `latest.json` to a draft release. Publishing the draft releases it: installed apps check `https://github.com/DollieAI/dollie-desktop/releases/latest/download/latest.json` every hour.
 
 ## Icons
 
