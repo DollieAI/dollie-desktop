@@ -6,22 +6,30 @@ authors = ["Dollie"]
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
-tauri-plugin-notification = "2"
-tauri-plugin-autostart = "2"
-tauri-plugin-window-state = "2"
-tauri-plugin-deep-link = "2"
-tauri-plugin-global-shortcut = "2"
-tauri-plugin-opener = "2"
+tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2.7"
+tauri-plugin-deep-link = "2.6"
+tauri-plugin-notification = "2.6"
+tauri-plugin-opener = "2.7"
+tauri-plugin-process = "2.4"
+tauri-plugin-updater = "2.13"
+tauri-plugin-window-state = "2.5"
+base64 = "0.22"
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "linux-native"] }
+rand = "0.9"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls-no-provider"] }
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+url = "2"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.26"
-objc = "0.2"
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"] }
 
 [lints.rust]
 unexpected_cfgs = "allow"

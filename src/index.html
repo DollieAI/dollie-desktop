@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dollie</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #0a0a0a;
+        --muted: #6b6b6f;
+        --line: #e4e4e7;
+        --danger: #dc2626;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0a0a0a;
+          --fg: #fafafa;
+          --muted: #97979a;
+          --line: #27272a;
+          --danger: #f87171;
+        }
+      }
+      * {
+        margin: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .drag {
+        position: fixed;
+        inset: 0 0 auto 0;
+        height: 40px;
+      }
+      section {
+        display: none;
+        flex-direction: column;
+        gap: 16px;
+        width: 100%;
+        max-width: 400px;
+      }
+      body[data-view="offline"] #offline,
+      body[data-view="connect"] #connect,
+      body[data-view="confirm"] #confirm {
+        display: flex;
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 600;
+      }
+      p,
+      .meta {
+        color: var(--muted);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      input {
+        font: inherit;
+        width: 100%;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--fg);
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      button {
+        font: inherit;
+        padding: 6px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--fg);
+        border-color: var(--fg);
+        color: var(--bg);
+      }
+      button.link {
+        border: 0;
+        padding: 6px 0;
+        color: var(--muted);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .error {
+        color: var(--danger);
+      }
+      .card {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+      .card img {
+        width: 40px;
+        height: 40px;
+        object-fit: contain;
+      }
+      .card strong {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="drag" data-tauri-drag-region></div>
+
+    <section id="offline">
+      <h1>Can't reach <span data-installation-name>Dollie</span></h1>
+      <p>Check your internet connection. It will open as soon as it is back.</p>
+      <div class="row">
+        <button type="button" id="retry">Try again</button>
+        <button type="button" class="link" data-show-connect>Connect to another installation</button>
+      </div>
+    </section>
+
+    <section id="connect">
+      <h1>Connect to an installation</h1>
+      <p class="meta" id="current"></p>
+      <form id="find" class="row">
+        <input id="address" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="dollie.yourcompany.com" aria-label="Installation address" required />
+        <button type="submit" class="primary">Find installation</button>
+      </form>
+      <p class="error" id="find-error" hidden></p>
+      <div class="row">
+        <button type="button" class="link" id="cloud">Use Dollie Cloud</button>
+        <button type="button" class="link" id="cancel">Cancel</button>
+      </div>
+    </section>
+
+    <section id="confirm">
+      <h1>Connect to this installation?</h1>
+      <div class="card">
+        <img id="found-logo" alt="" hidden />
+        <div>
+          <strong id="found-name"></strong>
+          <span class="meta" id="found-url"></span>
+        </div>
+      </div>
+      <p id="found-description"></p>
+      <p class="error" id="connect-error" hidden></p>
+      <div class="row">
+        <button type="button" class="primary" id="connect-button">Connect</button>
+        <button type="button" id="back">Back</button>
+      </div>
+    </section>
+
+    <script>
+      const boot = window.__DOLLIE_BOOT__ ?? {};
+      const invoke = (command, args) => window.__TAURI_INTERNALS__.invoke(command, args);
+      const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+      const $ = (id) => document.getElementById(id);
+      const show = (view) => (document.body.dataset.view = view);
+      const installationLabel = boot.installation?.name || (boot.installation?.url ? new URL(boot.installation.url).host : "Dollie");
+
+      if (boot.background && /^#[0-9a-f]{6}$/i.test(boot.background)) {
+        document.documentElement.style.setProperty("--bg", boot.background);
+      }
+      document.querySelectorAll("[data-installation-name]").forEach((el) => (el.textContent = installationLabel));
+      $("current").textContent = `Connected to ${installationLabel}`;
+
+      // Open: go to the installation once it answers; show the offline screen until then.
+      let attempt = 0;
+      let opening = boot.mode !== "connect";
+      async function open() {
+        if (!opening || !boot.to) return;
+        try {
+          await fetch(new URL(boot.to).origin, { mode: "no-cors", cache: "no-store" });
+          if (opening) location.replace(boot.to);
+        } catch {
+          show("offline");
+          setTimeout(open, Math.min(30000, 2000 * 2 ** attempt++));
+        }
+      }
+
+      function showConnect() {
+        opening = false;
+        show("connect");
+        $("address").focus();
+      }
+
+      function fail(element, error) {
+        element.textContent = typeof error === "string" ? error : "Something went wrong. Try again.";
+        element.hidden = false;
+      }
+
+      let found = null;
+      $("find").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = event.submitter;
+        $("find-error").hidden = true;
+        button.disabled = true;
+        try {
+          found = await invoke("find_installation", { address: $("address").value });
+          $("found-name").textContent = found.name;
+          $("found-url").textContent = new URL(found.url).host;
+          $("found-description").textContent = found.description;
+          const logo = (dark && found.logo_dark_url) || found.logo_url;
+          $("found-logo").hidden = !logo;
+          if (logo) $("found-logo").src = logo;
+          $("connect-error").hidden = true;
+          show("confirm");
+        } catch (error) {
+          fail($("find-error"), error);
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      async function connect(address, button, errorElement) {
+        button.disabled = true;
+        try {
+          await invoke("connect_installation", { address });
+        } catch (error) {
+          fail(errorElement, error);
+          button.disabled = false;
+        }
+      }
+
+      $("connect-button").addEventListener("click", (event) => connect(found.url, event.currentTarget, $("connect-error")));
+      $("cloud").addEventListener("click", (event) => connect(boot.cloud, event.currentTarget, $("find-error")));
+      $("back").addEventListener("click", () => show("connect"));
+      $("cancel").addEventListener("click", () => {
+        opening = true;
+        attempt = 0;
+        open();
+      });
+      $("retry").addEventListener("click", () => {
+        attempt = 0;
+        open();
+      });
+      document.querySelectorAll("[data-show-connect]").forEach((el) => el.addEventListener("click", showConnect));
+      window.addEventListener("online", open);
+
+      if (boot.mode === "connect") showConnect();
+      else open();
+    </script>
+  </body>
+</html>

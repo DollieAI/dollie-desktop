@@ -1,16 +1,20 @@
 # Dollie Desktop App
 
-Tauri wrapper for the Dollie web app with native desktop features.
+A thin Tauri 2 shell around a Dollie installation's web app. The web app owns behaviour; the shell provides native capabilities through one bridge, `window.DollieDesktop`. Design and decisions: `dollie/work-items/desktop-app/` in the Dollie vault. Linear's desktop app was the reference (`linear-desktop-map.md` there).
 
-## Features
+## What the shell does
 
-- System tray with quick access
-- Native notifications (bridged from Laravel Echo)
-- Dock badge count (macOS) / tray tooltip (Windows/Linux)
-- Deep linking (`dollie://path/to/page`)
-- Auto-start on login
-- Window state persistence
-- Global shortcut to summon app
+- Opens Dollie Cloud, or any installation the person connects through its `/api/v1/app/discover` endpoint (**Connect to Another Installation…**).
+- Signs in through the default browser with the installation's Passport (public PKCE client, redirect `dollie://auth/callback`), keeps the token in the OS keychain per installation, and opens the web session with a one-time ticket.
+- Keeps the window on the installation: other sites open in the browser; off-site flows started in the app are sent to the browser by chq and handed back with a `dollie://` link.
+- Native menu, close-to-hide on macOS, single instance, deep links (`dollie://path`), Dock badge, background notifications, downloads to ~/Downloads, an offline screen, and a signed auto-updater.
+- macOS: overlay title bar; chq reserves the traffic-light row when `html[data-desktop="macos"]` is set.
+
+## The bridge
+
+`src-tauri/src/bridge.js` is injected into the installation's pages and defines `window.DollieDesktop` (contract `2`). chq consumes it in `lib/desktop.ts` and `components/providers/DesktopBridge.tsx`. Add new capabilities to the bridge with a contract bump; keep app-specific behaviour in chq so it ships without a desktop release.
+
+The bridge's commands are granted at runtime to the connected installation only (`src-tauri/src/installation.rs`). The bundled start page (`src/index.html`) has its own capability (`src-tauri/capabilities/boot.json`).
 
 ## Prerequisites
 
@@ -21,20 +25,19 @@ Tauri wrapper for the Dollie web app with native desktop features.
 ## Development
 
 ```bash
-cd desktop-app
 npm install
 npm run dev
 ```
 
-This opens the app pointing to `https://app.dollie.pro`. For local development, edit `src-tauri/tauri.conf.json` and change `frontendDist` to your local URL.
+Debug builds open `https://api-layer.social` (the local chq); release builds open `https://app.dollie.pro`. Both are set in `src-tauri/src/installation.rs`.
 
-## Building
+## Building and updates
 
 ```bash
 npm run build
 ```
 
-Outputs to `src-tauri/target/release/bundle/`.
+Outputs to `src-tauri/target/release/bundle/`. Updates are signed with the key in `~/.tauri/dollie-desktop.key`; CI needs it as `TAURI_SIGNING_PRIVATE_KEY` and its password as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The app checks `https://github.com/DollieAI/dollie-desktop/releases/latest/download/latest.json`.
 
 ## Icons
 
@@ -43,40 +46,3 @@ Place your app icon as `src-tauri/icons/app-icon.png` (1024x1024), then run:
 ```bash
 npm run icons
 ```
-
-This generates all required icon sizes.
-
-## Integration with Web App
-
-Copy `tauri-bridge.js` to your web app or import it. Usage:
-
-```javascript
-import DollieBridge from './tauri-bridge.js';
-
-// In your Echo notification listener
-Echo.private(`App.Models.User.${userId}`)
-    .notification((notification) => {
-        // Show native notification when app is in background
-        DollieBridge.notifyIfBackground(
-            notification.title,
-            notification.body
-        );
-    });
-
-// Update badge when unread count changes
-Livewire.on('unreadCountChanged', (count) => {
-    DollieBridge.setBadgeCount(count);
-});
-```
-
-## Deep Links
-
-Register the app to handle `dollie://` URLs. After installing the built app, links like `dollie://tasks/123` will open the app and navigate to `https://app.dollie.pro/tasks/123`.
-
-## Configuration
-
-Key settings in `src-tauri/tauri.conf.json`:
-
-- `build.frontendDist`: The URL to load (production or local dev)
-- `app.security.dangerousRemoteUrlIpcAccess`: Domains allowed to use Tauri APIs
-- `plugins.deep-link.desktop.schemes`: URL schemes to register

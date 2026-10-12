@@ -1,243 +1,284 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(target_os = "macos")]
-#[macro_use]
-extern crate objc;
+mod auth;
+mod installation;
+mod menu;
+mod state;
+mod updater;
+mod window;
 
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    webview::WebviewWindowBuilder,
-    Listener, Manager, WebviewUrl,
+    AppHandle, Manager, RunEvent, WebviewWindow, WindowEvent,
 };
+use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_notification::NotificationExt;
+use url::Url;
 
-/// JavaScript injected into every page to handle theme detection
-const THEME_INIT_SCRIPT: &str = r#"
-(function() {
-    if (window.__TAURI_INIT__) return;
-    window.__TAURI_INIT__ = true;
+use state::{parse_hex, Prefs, Shell};
 
-    // ===== Theme Detection =====
-    window.__TAURI_THEME_DARK__ = window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-    let applying = false;
-
-    function applyTauriClasses() {
-        if (!document.body || applying) return;
-        applying = true;
-
-        const needsTauri = !document.body.classList.contains('tauri');
-        const needsDark = window.__TAURI_THEME_DARK__ && !document.body.classList.contains('dark');
-        const needsRemoveDark = !window.__TAURI_THEME_DARK__ && document.body.classList.contains('dark');
-
-        if (needsTauri) document.body.classList.add('tauri');
-        if (needsDark) document.body.classList.add('dark');
-        if (needsRemoveDark) document.body.classList.remove('dark');
-
-        applying = false;
-    }
-
-    applyTauriClasses();
-    document.addEventListener('DOMContentLoaded', applyTauriClasses);
-
-    const observer = new MutationObserver(function() {
-        if (!applying) applyTauriClasses();
-    });
-
-    function startObserver() {
-        if (document.body) {
-            observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-            applyTauriClasses();
-        } else {
-            requestAnimationFrame(startObserver);
-        }
-    }
-    startObserver();
-
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
-        window.__TAURI_THEME_DARK__ = e.matches;
-        applyTauriClasses();
-    });
-
-    document.addEventListener('livewire:navigated', applyTauriClasses);
-    document.addEventListener('livewire:init', applyTauriClasses);
-
-})();
-"#;
-
-/// Set the dock/taskbar badge count (macOS primarily)
 #[tauri::command]
-#[allow(unused_variables)]
-fn set_badge_count(app: tauri::AppHandle, count: u32) {
-    // macOS badge via cocoa
-    #[cfg(target_os = "macos")]
-    #[allow(deprecated)]
+fn set_badge_count(app: AppHandle, window: WebviewWindow, count: u32) {
+    #[cfg(not(windows))]
     {
-        use cocoa::appkit::NSApp;
-        use cocoa::base::nil;
-        use cocoa::foundation::NSString;
-        use objc::runtime::Object;
-        unsafe {
-            let app_instance: *mut Object = NSApp();
-            let dock_tile: *mut Object = msg_send![app_instance, dockTile];
-            if count > 0 {
-                let label = NSString::alloc(nil).init_str(&count.to_string());
-                let _: () = msg_send![dock_tile, setBadgeLabel: label];
-            } else {
-                let _: () = msg_send![dock_tile, setBadgeLabel: nil];
-            }
-        }
+        let _ = app;
+        let _ = window.set_badge_count((count > 0).then_some(count as i64));
     }
 
-    // Windows/Linux: Update tray icon tooltip as fallback
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
     {
+        let _ = window;
         if let Some(tray) = app.tray_by_id("main-tray") {
             let tooltip = if count > 0 {
-                format!("Dollie ({} unread)", count)
+                format!("Dollie ({count} unread)")
             } else {
-                "Dollie".to_string()
+                "Dollie".into()
             };
             let _ = tray.set_tooltip(Some(&tooltip));
         }
     }
 }
 
-/// Clear the badge
+/// Shows a system notification while the window is in the background.
 #[tauri::command]
-fn clear_badge(_app: tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
-    #[allow(deprecated)]
-    {
-        use cocoa::appkit::NSApp;
-        use cocoa::base::nil;
-        use objc::runtime::Object;
-        unsafe {
-            let app_instance: *mut Object = NSApp();
-            let dock_tile: *mut Object = msg_send![app_instance, dockTile];
-            let _: () = msg_send![dock_tile, setBadgeLabel: nil];
-        }
+fn notify(app: AppHandle, window: WebviewWindow, title: String, body: Option<String>) {
+    if window.is_focused().unwrap_or(false) && window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let mut builder = app.notification().builder().title(title);
+    if let Some(body) = body {
+        builder = builder.body(body);
+    }
+    let _ = builder.show();
+}
+
+/// The web app reports its theme so the next launch paints the right colour before it loads.
+#[tauri::command]
+fn report_theme(app: AppHandle, dark: bool, background: Option<String>) {
+    let background = background.filter(|hex| parse_hex(hex).is_some());
+    let shell = app.state::<Shell>();
+    let mut prefs = shell.prefs.lock().unwrap();
+    if prefs.dark == Some(dark) && prefs.background == background {
+        return;
+    }
+    prefs.dark = Some(dark);
+    prefs.background = background;
+    prefs.save(&app);
+    let color = prefs.background_color();
+    for window in app.webview_windows().values() {
+        let _ = window.set_background_color(Some(color));
     }
 }
 
-/// Show the main window and bring to front
 #[tauri::command]
-fn show_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
+fn open_external(url: String) -> Result<(), String> {
+    let url = Url::parse(&url).map_err(|e| e.to_string())?;
+    window::open_external(&url);
+    Ok(())
+}
+
+#[tauri::command]
+fn install_update(app: AppHandle) -> Result<(), String> {
+    updater::install(&app)
+}
+
+/// Opens a web session from the saved sign-in, or starts one in the browser unless `silent`.
+#[tauri::command]
+async fn sign_in(app: AppHandle, silent: bool) -> Result<&'static str, String> {
+    Ok(match auth::sign_in(&app, silent).await? {
+        auth::Outcome::SignedIn => "signed-in",
+        auth::Outcome::Browser => "browser",
+        auth::Outcome::NeedsBrowser => "needs-browser",
+    })
+}
+
+/// `dollie://tasks/123?x=1` → `<installation>/tasks/123?x=1`.
+fn route_deep_link(app: &AppHandle, link: &Url) {
+    if link.scheme() != "dollie" {
+        return;
+    }
+    if link.host_str() == Some("auth") && link.path() == "/callback" {
+        let app = app.clone();
+        let callback = link.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(message) = auth::complete(&app, &callback).await {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Sign-in failed")
+                    .body(message)
+                    .show();
+            }
+        });
+        return;
+    }
+    let path = format!(
+        "/{}{}{}",
+        link.host_str().unwrap_or_default(),
+        link.path(),
+        link.query().map(|q| format!("?{q}")).unwrap_or_default()
+    );
+    if let Some(url) = app.state::<Shell>().app_url(&path) {
+        window::navigate(app, &url);
     }
 }
 
-/// Open a URL in the system's default browser
-#[tauri::command]
-fn open_in_browser(url: String) -> Result<(), String> {
-    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| e.to_string())
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "tray-show", "Show Dollie", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "tray-quit", "Quit Dollie", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let mut tray = TrayIconBuilder::with_id("main-tray")
+        .tooltip("Dollie")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Some(main) = tray.app_handle().get_webview_window(window::MAIN) {
+                    window::reveal(&main);
+                }
+            }
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "tray-show" => {
+                if let Some(main) = app.get_webview_window(window::MAIN) {
+                    window::reveal(&main);
+                }
+            }
+            "tray-quit" => app.exit(0),
+            _ => {}
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
 }
 
 fn main() {
-    tauri::Builder::default()
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mut builder = tauri::Builder::default();
+
+    // Must be first: a second launch hands its arguments (and deep link) to this process.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(main) = app.get_webview_window(window::MAIN) {
+                window::reveal(&main);
+            }
+        }));
+    }
+
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
-        .plugin(tauri_plugin_window_state::Builder::new().build())
-        .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // Get the URL from config (devUrl in dev, frontendDist in prod)
-            let url = if cfg!(debug_assertions) {
-                "https://api-layer.social"
-            } else {
-                "https://app.dollie.pro"
-            };
-
-            // Create the main window with initialization script
-            let _window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse().unwrap()))
-                .title("Dollie")
-                .inner_size(1600.0, 1000.0)
-                .min_inner_size(800.0, 600.0)
-                .center()
-                .maximized(true)
-                .decorations(true)
-                .resizable(true)
-                .initialization_script(THEME_INIT_SCRIPT)
-                .build()?;
-
-            // Build tray menu
-            let show_item = MenuItem::with_id(app, "show", "Show Dollie", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-
-            // Create tray icon
-            let tray_icon = tauri::image::Image::from_path("icons/32x32.png")
-                .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
-            let _tray = TrayIconBuilder::with_id("main-tray")
-                .icon(tray_icon)
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                })
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .build(app)?;
-
-            // Handle deep links (dollie://...)
             let handle = app.handle().clone();
-            let dev_mode = cfg!(debug_assertions);
-            app.listen("deep-link://new-url", move |event| {
-                let payload = event.payload();
-                // Navigate to the deep link URL
-                if let Some(window) = handle.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+            let prefs = Prefs::load(&handle);
+            let (origin, client_id) = prefs
+                .installation
+                .as_ref()
+                .and_then(|saved| Some((Url::parse(&saved.url).ok()?, saved.client_id.clone())))
+                .unwrap_or((
+                    Url::parse(installation::DOLLIE_CLOUD)?,
+                    installation::DOLLIE_CLOUD_CLIENT_ID.to_owned(),
+                ));
+            app.manage(Shell::new(origin.clone(), client_id, prefs));
+            app.manage(installation::Granted::default());
+            installation::grant(&handle, &origin)?;
+            app.manage(auth::PendingSignIn::default());
 
-                    // The URL will be something like dollie://tasks/123
-                    if let Some(path) = payload.strip_prefix("dollie://") {
-                        let base_url = if dev_mode {
-                            "https://api-layer.social"
-                        } else {
-                            "https://app.dollie.pro"
-                        };
+            #[cfg(target_os = "macos")]
+            app.set_menu(menu::build(&handle)?)?;
+            app.on_menu_event(menu::handle);
+            build_tray(&handle)?;
 
-                        let web_url = format!("{}/{}", base_url, path);
-                        let _ = window.eval(&format!("window.location.href = '{}'", web_url));
-                    }
+            #[cfg(any(windows, target_os = "linux"))]
+            let _ = app.deep_link().register_all();
+
+            let shell = app.state::<Shell>();
+            let launched_with = app
+                .deep_link()
+                .get_current()
+                .ok()
+                .flatten()
+                .and_then(|links| links.into_iter().next())
+                .and_then(|link| shell.app_url(&format!("/{}{}", link.host_str().unwrap_or_default(), link.path())));
+            let start_hidden = std::env::args().any(|arg| arg == "--hidden");
+            window::open(
+                &handle,
+                window::MAIN,
+                launched_with.as_ref().unwrap_or(&origin),
+                !start_hidden,
+            )?;
+
+            let links = handle.clone();
+            app.deep_link().on_open_url(move |event| {
+                for link in event.urls() {
+                    route_deep_link(&links, &link);
                 }
             });
 
+            updater::start(handle);
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // macOS keeps the app running when its last window closes, as native apps do.
+            #[cfg(target_os = "macos")]
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == window::MAIN {
+                    api.prevent_close();
+                    if window.is_fullscreen().unwrap_or(false) {
+                        let _ = window.set_fullscreen(false);
+                    }
+                    let _ = window.hide();
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (window, event);
         })
         .invoke_handler(tauri::generate_handler![
             set_badge_count,
-            clear_badge,
-            show_window,
-            open_in_browser,
+            notify,
+            report_theme,
+            open_external,
+            install_update,
+            sign_in,
+            installation::find_installation,
+            installation::connect_installation,
+            installation::choose_installation,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building Dollie")
+        .run(|app, event| {
+            if let RunEvent::ExitRequested { code: None, api, .. } = &event {
+                if app.state::<Shell>().reopening.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
+            }
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = event
+            {
+                if let Some(main) = app.get_webview_window(window::MAIN) {
+                    window::reveal(&main);
+                }
+            }
+        });
 }

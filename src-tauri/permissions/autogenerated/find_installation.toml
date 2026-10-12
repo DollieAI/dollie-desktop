@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-find-installation"
+description = "Enables the find_installation command without any pre-configured scope."
+commands.allow = ["find_installation"]
+
+[[permission]]
+identifier = "deny-find-installation"
+description = "Denies the find_installation command without any pre-configured scope."
+commands.deny = ["find_installation"]

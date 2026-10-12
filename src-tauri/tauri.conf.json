@@ -4,18 +4,16 @@
   "version": "0.1.0",
   "identifier": "com.dollie.desktop",
   "build": {
-    "devUrl": "https://api-layer.social",
-    "frontendDist": "https://app.dollie.pro"
+    "frontendDist": "../src"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [],
     "security": {
-      "csp": null
-    },
-    "trayIcon": {
-      "iconPath": "icons/32x32.png",
-      "iconAsTemplate": false
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src https:",
+      "capabilities": [
+        "boot"
+      ]
     }
   },
   "bundle": {
@@ -42,13 +40,22 @@
       },
       "certificateThumbprint": null,
       "timestampUrl": "http://timestamp.digicert.com"
-    }
+    },
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["dollie"]
+        "schemes": [
+          "dollie"
+        ]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk5NkZEODUzMThEQzNGNzAKUldSd1A5d1lVOWh2bWFWak95b3QxSTRkZ2pHYWJ2bEh5Y3BFTkFESll6c2c4VE1rRDgzTll6OGcK",
+      "endpoints": [
+        "https://github.com/DollieAI/dollie-desktop/releases/latest/download/latest.json"
+      ]
     }
   }
 }
