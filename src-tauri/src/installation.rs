@@ -24,11 +24,12 @@ pub const DOLLIE_CLOUD: &str = if cfg!(debug_assertions) {
 pub const DOLLIE_CLOUD_CLIENT_ID: &str = "5059a42d-93c8-4d27-b24e-f4fcda05b8e4";
 
 /// What the web app may call from an installation's pages. Nothing else.
-const BRIDGE_PERMISSIONS: [&str; 10] = [
+const BRIDGE_PERMISSIONS: [&str; 11] = [
     "core:window:allow-start-dragging",
     "core:window:allow-internal-toggle-maximize",
     "notification:allow-is-permission-granted",
     "allow-set-badge-count",
+    "allow-request-notifications",
     "allow-notify",
     "allow-report-theme",
     "allow-open-external",

@@ -3,6 +3,8 @@
 mod auth;
 mod installation;
 mod menu;
+#[cfg(target_os = "macos")]
+mod notifications;
 mod state;
 mod updater;
 mod window;
@@ -18,11 +20,24 @@ use url::Url;
 
 use state::{parse_hex, Prefs, Shell};
 
+/// A count when something needs the person; otherwise `dot` marks unread news.
 #[tauri::command]
-fn set_badge_count(app: AppHandle, window: WebviewWindow, count: u32) {
-    #[cfg(not(windows))]
+fn set_badge_count(app: AppHandle, window: WebviewWindow, count: u32, dot: Option<bool>) {
+    let dot = dot.unwrap_or(false);
+
+    #[cfg(target_os = "macos")]
     {
         let _ = app;
+        let _ = if count > 0 {
+            window.set_badge_count(Some(count as i64))
+        } else {
+            window.set_badge_label(dot.then(|| "•".to_string()))
+        };
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        let _ = (app, dot);
         let _ = window.set_badge_count((count > 0).then_some(count as i64));
     }
 
@@ -32,6 +47,8 @@ fn set_badge_count(app: AppHandle, window: WebviewWindow, count: u32) {
         if let Some(tray) = app.tray_by_id("main-tray") {
             let tooltip = if count > 0 {
                 format!("Dollie ({count} unread)")
+            } else if dot {
+                "Dollie (new notifications)".into()
             } else {
                 "Dollie".into()
             };
@@ -46,11 +63,22 @@ fn notify(app: AppHandle, window: WebviewWindow, title: String, body: Option<Str
     if window.is_focused().unwrap_or(false) && window.is_visible().unwrap_or(false) {
         return;
     }
+    #[cfg(target_os = "macos")]
+    if notifications::show(&title, body.as_deref()) {
+        return;
+    }
     let mut builder = app.notification().builder().title(title);
     if let Some(body) = body {
         builder = builder.body(body);
     }
     let _ = builder.show();
+}
+
+/// Asks the system once for permission to show notifications; the web app calls it after sign-in.
+#[tauri::command]
+fn request_notifications() {
+    #[cfg(target_os = "macos")]
+    notifications::request_permission();
 }
 
 /// The web app reports its theme so the next launch paints the right colour before it loads.
@@ -253,6 +281,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             set_badge_count,
+            request_notifications,
             notify,
             report_theme,
             open_external,

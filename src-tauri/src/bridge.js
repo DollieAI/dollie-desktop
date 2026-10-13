@@ -63,10 +63,14 @@
 
   Object.defineProperty(window, "DollieDesktop", {
     value: Object.freeze({
-      contract: 2,
+      contract: 3,
       platform: DOLLIE_DESKTOP_CONFIG.platform,
       version: DOLLIE_DESKTOP_CONFIG.version,
-      setBadgeCount: (count) => invoke("set_badge_count", { count: Math.max(0, Math.floor(count || 0)) }),
+      // Contract 3: `dot` marks the icon when nothing is counted but something is unread.
+      setBadgeCount: (count, { dot = false } = {}) =>
+        invoke("set_badge_count", { count: Math.max(0, Math.floor(count || 0)), dot: !!dot }),
+      // Contract 3: asks the system once for permission to show notifications.
+      requestNotifications: () => invoke("request_notifications"),
       notify: ({ title, body }) => invoke("notify", { title, body: body ?? null }),
       reportTheme: ({ dark, background }) => invoke("report_theme", { dark: !!dark, background: background ?? null }),
       openExternal: (url) => invoke("open_external", { url }),
